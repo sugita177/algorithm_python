@@ -2,13 +2,12 @@
 
 import networkx as nx
 import matplotlib.pyplot as plt
-import heapq  # 優先度付きキューを使用
-# import math
-# import time
+from matplotlib.lines import Line2D
+import heapq
 
-# --- 日本語フォント設定（前回成功した設定を再利用）---
+# --- 日本語フォント設定（成功した設定を再利用）---
 plt.rcParams['font.family']\
-      = ['Meiryo', 'MS Gothic', 'Yu Gothic', 'DejaVu Sans']
+    = ['Meiryo', 'MS Gothic', 'Yu Gothic', 'DejaVu Sans']
 plt.rcParams['font.sans-serif']\
     = ['Meiryo', 'MS Gothic', 'Yu Gothic', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
@@ -29,7 +28,51 @@ G.add_weighted_edges_from(edges_with_weights)
 # ノード配置の再現性を確保
 pos = nx.spring_layout(G, seed=42)
 
-plt.figure(figsize=(8, 5))
+plt.figure(figsize=(12, 6))
+
+
+def _get_shortest_path_edges(predecessors):
+    """最短経路木のエッジリストを生成するヘルパー関数"""
+    spt_edges = set()
+    for node, pred in predecessors.items():
+        if pred is not None:
+            spt_edges.add(tuple(sorted((node, pred))))
+    return spt_edges
+
+
+def create_legend(ax, current_step_is_final=False):
+    """
+    plt.legend() を使用して、ノードとエッジの凡例を作成する関数
+    """
+    legend_elements = []
+    # --- ノード凡例 (Line2Dのmarker='o'で円として表現) ---
+    legend_elements.append(
+        Line2D([0], [0], marker='o', color='w', label='確定 (Finalized)',
+               markersize=10, markerfacecolor='limegreen'))
+    legend_elements.append(
+        Line2D([0], [0], marker='o', color='w', label='処理中 (Current)',
+               markersize=10, markerfacecolor='red'))
+    legend_elements.append(
+        Line2D([0], [0], marker='o', color='w', label='暫定 (Tentative)',
+               markersize=10, markerfacecolor='yellow'))
+    legend_elements.append(
+        Line2D([0], [0], marker='o', color='w', label='未到達 (Unvisited)',
+               markersize=10, markerfacecolor='lightgray'))
+
+    # --- エッジ凡例 (Line2Dで線として表現) ---
+    if current_step_is_final:
+        legend_elements.append(Line2D([0], [0], color='dodgerblue',
+                                      lw=3, label='最短経路エッジ (SPT)'))
+    else:
+        legend_elements.append(Line2D([0], [0], color='orange',
+                                      lw=3, label='緩和処理エッジ (Relaxation)'))
+        legend_elements.append(Line2D([0], [0], color='dodgerblue',
+                                      lw=3, label='SPT候補エッジ'))
+
+    # 凡例をグラフ描画エリアの外側（右側）に配置
+    ax.legend(handles=legend_elements, loc='center left',
+              bbox_to_anchor=(1.05, 0.5),
+              title="【凡例】", fontsize=9, title_fontsize=10)
 
 
 def visualize_dijkstra(graph, start_node, pause_time=1.5):
@@ -55,33 +98,26 @@ def visualize_dijkstra(graph, start_node, pause_time=1.5):
     # 描画用: ノードとエッジの色の初期設定
     node_colors = ['lightgray'] * len(nodes)  # 'lightgray': 未確定/未到達
     node_color_map = {node: 'lightgray' for node in nodes}
-    # edge_colors = ['gray'] * len(graph.edges)
-
-    # 探索ステップカウンター
     step_counter = 1
+
+    # NetworkXからエッジの重みを取得
+    edge_labels = nx.get_edge_attributes(graph, 'weight')
+
+    # グラフ描画エリアを左にずらす（凡例のスペースを確保）
+    plt.subplots_adjust(right=0.75)
 
     print(f"--- ダイクストラ法開始: 始点 '{start_node}' ---")
 
     while pq:
-        # ----------------------------------------------------
-        # STEP 1: 優先度付きキューから最小距離のノードを取り出す
-        # ----------------------------------------------------
+        plt.clf()
+        ax = plt.gca()  # 現在のAxesを取得
 
         # 最小距離のノードを取得
         current_dist, u = heapq.heappop(pq)
 
-        # すでに確定済みならスキップ
-        if u in finalized_nodes:
-            continue
-
-        # ----------------------------------------------------
-        # STEP 2: 描画（処理対象ノードの強調）
-        # ----------------------------------------------------
-
-        plt.clf()
-
-        # ノード u を赤で強調（現在処理中）
-        node_color_map[u] = 'red'
+        if u not in finalized_nodes:
+            # STEP 1: 処理対象ノードの強調
+            node_color_map[u] = 'red'  # 処理対象を赤に
 
         # ノードラベル (ノード名 + 距離) を更新
         node_labels = {}
@@ -90,26 +126,39 @@ def visualize_dijkstra(graph, start_node, pause_time=1.5):
                 if distances[node] != float('inf') else '∞'
             node_labels[node] = f'{node}\n(距離: {dist_str})'
 
-        # ノードの最終色リストを作成
         node_colors = [node_color_map[node] for node in nodes]
 
-        nx.draw(
+        # 描画 (ここではエッジの色はリセット、重みラベルは未表示)
+        nx.draw_networkx(
             graph, pos, with_labels=True, labels=node_labels,
-            node_color=node_colors, node_size=3000,
-            font_size=10, font_weight='bold',
-            edge_color='gray'  # エッジ色はリセット
+            node_color=node_colors, node_size=3000, font_size=10,
+            font_weight='bold', edge_color='gray', ax=ax
         )
 
-        print(f"\n[STEP {step_counter}] 確定候補ノード: {u} (距離: {current_dist})")
-        plt.title(f"Step {step_counter}: ノード '{u}' を処理中（距離確定）")
+        # エッジの重みを出力
+        nx.draw_networkx_edge_labels(
+            graph, pos, edge_labels=edge_labels,
+            font_color='darkslategrey', ax=ax
+        )
 
-        plt.pause(pause_time)
+        # 凡例の追加
+        create_legend(ax)
 
         # ----------------------------------------------------
-        # STEP 3: 距離の確定と緩和処理（Relaxation）
+        # 処理前の一時停止
+        # ----------------------------------------------------
+        if u not in finalized_nodes:
+            print(f"\n[STEP {step_counter}] 確定候補ノード: {u} (距離: {current_dist})")
+            plt.title(f"Step {step_counter}: ノード '{u}' を処理中（距離確定）")
+            plt.pause(pause_time)
+
+        # ----------------------------------------------------
+        # 距離の確定と緩和処理
         # ----------------------------------------------------
 
-        # ノード u の距離を確定
+        if u in finalized_nodes:
+            continue
+
         finalized_nodes.add(u)
         node_color_map[u] = 'limegreen'  # 確定したノードは緑に
 
@@ -129,60 +178,59 @@ def visualize_dijkstra(graph, start_node, pause_time=1.5):
 
                 # ノード v を黄色で強調（暫定距離更新）
                 if v not in finalized_nodes:
-                    node_color_map[v] = 'yellow'
+                    node_color_map[v] = 'yellow'  # 暫定距離更新を黄色で強調
 
                 relaxation_info.append(
                     f"{u} -> {v} ({old_dist} -> {new_dist})"
-                    )
-                print(
-                    f"   -> 緩和処理: {u} -> {v} (重み{weight})。"
-                    f"距離を {old_dist} から {new_dist} に更新。"
-                    )
+                )
 
-            # ----------------------------------------------------
-            # STEP 4: 緩和処理後の状態を描画（エッジの強調）
-            # ----------------------------------------------------
+                # ----------------------------------------------------
+                # 緩和処理後の状態を描画（エッジの強調）
+                # ----------------------------------------------------
 
-            plt.clf()
+                plt.clf()
+                ax = plt.gca()  # 現在のAxesを取得
 
-            # エッジの色を更新: 現在緩和処理を行ったエッジをオレンジに強調
-            temp_edge_colors = []
-            for edge in graph.edges():
-                is_in_relaxation\
-                    = (edge[0] == u and edge[1] == v)\
-                    or (edge[0] == v and edge[1] == u)
-                if is_in_relaxation is True:
-                    temp_edge_colors.append('orange')
-                # 最短経路木の一部
-                elif edge in _get_shortest_path_edges(predecessors):
-                    temp_edge_colors.append('dodgerblue')
-                else:
-                    temp_edge_colors.append('gray')
+                # エッジの色を更新: 緩和処理中のエッジをオレンジに
+                temp_edge_colors = []
+                for edge in graph.edges():
+                    is_edge_in_relaxation\
+                        = (edge[0] == u and edge[1] == v)\
+                        or (edge[0] == v and edge[1] == u)
+                    if is_edge_in_relaxation:
+                        temp_edge_colors.append('orange')
+                    else:
+                        temp_edge_colors.append('gray')
 
-            # ノードラベルを再作成（更新後の距離を反映）
-            for node in nodes:
-                dist_str = str(distances[node])\
-                    if distances[node] != float('inf') else '∞'
-                node_labels[node] = f'{node}\n(距離: {dist_str})'
+                # ノードラベルを再作成（更新後の距離を反映）
+                for node in nodes:
+                    dist_str = str(distances[node])\
+                        if distances[node] != float('inf') else '∞'
+                    node_labels[node] = f'{node}\n(距離: {dist_str})'
 
-            # ノードの最終色リストを作成
-            node_colors = [node_color_map[node] for node in nodes]
+                node_colors = [node_color_map[node] for node in nodes]
 
-            nx.draw(
-                graph, pos, with_labels=True, labels=node_labels,
-                node_color=node_colors, node_size=3000,
-                font_size=10, font_weight='bold',
-                edge_color=temp_edge_colors
-            )
+                nx.draw_networkx(
+                    graph, pos, with_labels=True, labels=node_labels,
+                    node_color=node_colors, node_size=3000, font_size=10,
+                    font_weight='bold',
+                    edge_color=temp_edge_colors, ax=ax
+                )
 
-            if relaxation_info:
-                plt.title(
-                    f"Step {step_counter} (緩和処理): {', '.join(relaxation_info)}"
-                    )
-            else:
-                plt.title(f"Step {step_counter}: ノード {u} は緩和処理なし")
+                # エッジの重みを出力
+                nx.draw_networkx_edge_labels(
+                    graph, pos, edge_labels=edge_labels,
+                    font_color='darkslategrey', ax=ax)
 
-            plt.pause(pause_time / 2)  # 緩和処理のステップは短めにポーズ
+                # 凡例の追加
+                create_legend(ax)
+
+                plt.title(f"Step {step_counter} (緩和処理): "
+                          f"{', '.join(relaxation_info)}")
+                print(f"   -> 緩和処理: {u} -> {v} (重み{weight})。"
+                      f"距離を {old_dist} から {new_dist} に更新。")
+
+                plt.pause(pause_time / 2)  # 緩和処理のステップは短めにポーズ
 
         step_counter += 1
 
@@ -192,12 +240,15 @@ def visualize_dijkstra(graph, start_node, pause_time=1.5):
     # FINAL STEP: 最終結果の描画
     # ----------------------------------------------------
     plt.clf()
+    ax = plt.gca()
 
     # 最短経路木 (SPT) のエッジを青で強調
     spt_edges = _get_shortest_path_edges(predecessors)
-    final_edge_colors\
-        = ['dodgerblue' if edge in spt_edges or (edge[1], edge[0])
-           in spt_edges else 'lightgray' for edge in graph.edges()]
+    final_edge_colors = ['dodgerblue'
+                         if edge in spt_edges
+                         or (edge[1], edge[0]) in spt_edges
+                         else 'lightgray'
+                         for edge in graph.edges()]
 
     # 最終的なノードの色（全て確定なので緑）
     final_node_colors = ['limegreen'] * len(nodes)
@@ -208,12 +259,20 @@ def visualize_dijkstra(graph, start_node, pause_time=1.5):
             if distances[node] != float('inf') else '∞'
         node_labels[node] = f'{node}\n(確定距離: {dist_str})'
 
-    nx.draw(
+    nx.draw_networkx(
         graph, pos, with_labels=True, labels=node_labels,
         node_color=final_node_colors, node_size=3000,
         font_size=10, font_weight='bold',
-        edge_color=final_edge_colors
+        edge_color=final_edge_colors, ax=ax
     )
+
+    # エッジの重みを出力
+    nx.draw_networkx_edge_labels(
+        graph, pos, edge_labels=edge_labels, font_color='darkslategrey', ax=ax)
+
+    # 凡例の追加
+    create_legend(ax, True)
+
     plt.title("ダイクストラ法 最終結果: 最短経路木")
 
     print("\n[最終的な最短距離]")
@@ -225,15 +284,5 @@ def visualize_dijkstra(graph, start_node, pause_time=1.5):
     plt.show()
 
 
-def _get_shortest_path_edges(predecessors):
-    """最短経路木のエッジリストを生成するヘルパー関数"""
-    spt_edges = set()
-    for node, pred in predecessors.items():
-        if pred is not None:
-            # エッジは(ノード, プレデシッサ)のタプルとして保存
-            spt_edges.add(tuple(sorted((node, pred))))
-    return spt_edges
-
-
-# 実行（始点 'A' からスタート）
-visualize_dijkstra(G, start_node='A', pause_time=3.0)
+# 実行
+visualize_dijkstra(G, start_node='A', pause_time=5.0)
