@@ -1,8 +1,11 @@
 # プリム法
+# mst : Minimum Spanning Tree（最小全域木）
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import sys  # 無限大 (sys.maxsize) を使用するため
+from matplotlib.lines import Line2D  # Line2Dをインポート
+
 
 # --- 日本語フォント設定 (環境に合わせて適宜調整してください) ---
 plt.rcParams['font.family']\
@@ -32,6 +35,38 @@ node_map = {node: i for i, node in enumerate(nodes)}  # ノード名 -> イン�
 
 # ノードの描画位置を固定
 pos = nx.circular_layout(G)
+
+
+def create_prim_legend(ax, current_step_is_final=False):
+    """
+    プリム法可視化用の凡例要素を作成し、軸に追加する
+    """
+    legend_elements = []
+
+    # 1. ノードの凡例
+    legend_elements.extend([
+        Line2D([0], [0], marker='o', color='w', label='MST確定ノード',
+               markersize=10, markerfacecolor='limegreen'),
+        Line2D([0], [0], marker='o', color='w', label='現在選択中のノード',
+               markersize=10, markerfacecolor='red'),
+        Line2D([0], [0], marker='o', color='w', label='未選択ノード',
+               markersize=10, markerfacecolor='skyblue')
+    ])
+
+    # 2. エッジの凡例
+    legend_elements.extend([
+        Line2D([0], [0], color='darkgreen', lw=3, label='MST確定エッジ'),
+        Line2D([0], [0], color='red', lw=2, label='MST候補エッジ'),
+        Line2D([0], [0], color='lightgray', lw=1, label='その他エッジ')
+    ])
+
+    # 凡例をグラフ描画エリアの右外側へ配置
+    ax.legend(handles=legend_elements,
+              loc='center left',
+              bbox_to_anchor=(1.05, 0.5),  # 軸の右側に配置
+              title="【プリム法 凡例】",
+              fontsize=9,
+              title_fontsize=10)
 
 
 def draw_graph_step(
@@ -94,6 +129,10 @@ def draw_graph_step(
     edge_labels = nx.get_edge_attributes(G, 'weight')
     nx.draw_networkx_edge_labels(
         G, pos, edge_labels=edge_labels, font_color='darkgray', ax=ax)
+
+    # --- 凡例の描画を追加 ---
+    create_prim_legend(ax)
+    # --------------------------
 
     # タイトル
     mst_nodes_str = ", ".join(sorted(list(mst_set)))
@@ -208,7 +247,8 @@ def prim_visualized(G, start_node, pause_time=0.8):
 
 # 実行
 # --- ループに入る前に Figure を作成する ---
-plt.figure(figsize=(10, 8))
+plt.figure(figsize=(12, 8))  # サイズを広げ、凡例が入るスペースを確保
+plt.subplots_adjust(right=0.75)  # グラフ描画エリアを右端から75%の位置に制限
 # --------------------------------------------------
 
-prim_visualized(G, start_node='A', pause_time=0.8)
+prim_visualized(G, start_node='A', pause_time=2.0)
